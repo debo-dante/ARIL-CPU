@@ -26,8 +26,9 @@ import time
 
 from tqdm import tqdm
 
-from models.apl import *
+#from models.apl import *
 # from models.apl_plus import *
+from models.transformer_csi import TransformerCSI
 
 batch_size = 128
 num_epochs = 200
