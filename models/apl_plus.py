@@ -3,6 +3,8 @@ import torch.utils.model_zoo as model_zoo
 import torch.nn.functional as F
 import torch
 
+import torch.nn.functional as F
+from torch.nn import MultiheadAttention
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -206,3 +208,46 @@ class ResNet(nn.Module):
 
         return act1, loc1, x, c1, c2, c3, c4, act, loc
 
+class APLPlus(nn.Module):
+    def __init__(self, block=BasicBlock, layers=[2, 2, 2, 2], num_classes_act=6, num_classes_loc=16):
+        super(APLPlus, self).__init__()
+        self.inplanes = 64
+        self.conv1 = nn.Conv1d(30, 64, kernel_size=7, stride=1, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool1d(kernel_size=3, stride=1, padding=1)
+        self.layer1 = self._make_layer(block, 64, layers[0])
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=1)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=1)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=1)
+        
+        # Attention layer
+        self.attn = MultiheadAttention(embed_dim=512, num_heads=8, batch_first=True)
+        
+        # Heads
+        self.avgpool = nn.AdaptiveAvgPool1d(1)
+        self.fc_act = nn.Linear(512, num_classes_act)
+        self.fc_loc = nn.Linear(512, num_classes_loc)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        # Attention: reshape to (batch_size, seq_len, features)
+        x = x.permute(0, 2, 1)
+        x, _ = self.attn(x, x, x)  # Self-attention
+        x = x.permute(0, 2, 1)
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        act_out = self.fc_act(x)
+        loc_out = self.fc_loc(x)
+
+        return act_out, loc_out
